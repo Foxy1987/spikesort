@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sklearn as sk
 from sklearn.decomposition import PCA
-
+from sklearn.cluster import KMeans
 
 def downsample_data(data, sf, target_sf):
 	factor = sf/target_sf
@@ -89,39 +89,6 @@ def get_spikes(data, spike_window=80, tf=5, offset=10, max_thresh=350):
 	return spike_samp, wave_form, v_peaks
 
 
-def k_means(data, num_clus=3, steps=200):
-
-	# Convert data to Numpy array
-	cluster_data = np.array(data)
-
-	# Initialize by randomly selecting points in the data
-	center_init = np.random.randint(0, cluster_data.shape[0], num_clus)
-
-	# Create a list with center coordinates
-	center_init = cluster_data[center_init, :]
-
-	# Repeat clustering  x times
-	for _ in range(steps):
-
-		# Calculate distance of each data point to cluster center
-		distance = []
-		for center in center_init:
-			tmp_distance = np.sqrt(np.sum((cluster_data - center)**2, axis=1))
-
-			# Adding smalle random noise to the data to avoid matching distances to centroids
-			tmp_distance = tmp_distance + np.abs(np.random.randn(len(tmp_distance))*0.0001)
-			distance.append(tmp_distance)
-
-		# Assign each point to cluster based on minimum distance
-		_, cluster = np.where(np.transpose(distance == np.min(distance, axis=0)))
-
-		# Find center of mass for each cluster
-		center_init = []
-		for i in range(num_clus):
-			center_init.append(cluster_data[cluster == i, :].mean(axis=0).tolist())
-
-	return cluster, center_init, distance
-
 
 
 if __name__ == "__main__":
@@ -164,9 +131,10 @@ if __name__ == "__main__":
 	scaler = sk.preprocessing.MinMaxScaler()
 	dataset_scaled = scaler.fit_transform(wave_form)
 
-	model = PCA(n_components=20)
+	model = PCA(n_components=2)
 	#W = model.components_
 	pca_result = model.fit_transform(dataset_scaled)
+	print("The first two PCs account for {}%".format(np.sum(model.explained_variance_[:2]) * 100))
 
 	# if we want to project new data onto the pca basis, then we just take the scores
 	# in each PC and multiply with the waveforms. Now the waveforms are represented in
@@ -177,13 +145,12 @@ if __name__ == "__main__":
 
 
 	num_clus = 6
-	cluster, centers, distance = k_means(pca_result, num_clus)
-
+	kmeans = KMeans(n_clusters=3, random_state=170).fit_predict(pca_result)
 
 	fig, (ax1, ax2) = plt.subplots(1, 2)
-	ax1.plot(wave_form[np.where(cluster == 0)[0], :].T, 'k', alpha=0.1)
-	ax1.plot(wave_form[np.where(cluster == 1)[0], :].T, 'b', alpha=0.1)
-	ax1.plot(wave_form[np.where(cluster == 2)[0], :].T, 'r', alpha=0.1)
+	ax1.plot(wave_form[np.where(kmeans == 0)[0], :].T, 'k', alpha=0.1)
+	ax1.plot(wave_form[np.where(kmeans == 1)[0], :].T, 'b', alpha=0.1)
+	ax1.plot(wave_form[np.where(kmeans == 2)[0], :].T, 'r', alpha=0.1)
 
 	# plot spike trace
 	#ax2.plot(-spike_data)
@@ -192,10 +159,10 @@ if __name__ == "__main__":
 
 	# all spikes in unfiltered trace
 	raw = data[spike_samp]
-	plt.plot(data)
+	plt.plot(data, linewidth=0.5)
 	# all spikes
 	#plt.plot(spike_samp, raw, 'o')
-	plt.plot(spike_samp[np.where(cluster == 0)[0]], raw[np.where(cluster == 0)[0]], 'ok')
-	plt.plot(spike_samp[np.where(cluster == 1)[0]], raw[np.where(cluster == 1)[0]], 'ok')
-	plt.plot(spike_samp[np.where(cluster == 2)[0]], raw[np.where(cluster == 2)[0]], 'or')
+	plt.plot(spike_samp[np.where(kmeans == 0)[0]], raw[np.where(kmeans == 0)[0]], 'ok', markersize=2)
+	plt.plot(spike_samp[np.where(kmeans == 1)[0]], raw[np.where(kmeans == 1)[0]], 'ob', markersize=2)
+	plt.plot(spike_samp[np.where(kmeans == 2)[0]], raw[np.where(kmeans == 2)[0]], 'or', markersize=2)
 
