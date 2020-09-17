@@ -3,7 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sklearn as sk
 from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AgglomerativeClustering
+
+def get_psth(sptrain, winsize, samprate):
+	smooth_win = np.hanning(winsize) / np.hanning(winsize).sum()
+	# for multiple trials, average spikes across time bins and then convolve
+	psth = np.convolve(np.mean(sptrain, axis=1), smooth_win)
+	sigrange = np.arange(winsize // 2, winsize // 2 + len(sptrain))
+	psth_ = psth[sigrange]*samprate
+	return psth_
+
 
 def downsample_data(data, sf, target_sf):
 	factor = sf/target_sf
@@ -24,12 +33,11 @@ def filter_data(data, low, high, sf, order=2):
 	# Determine Nyquist frequency
 	nyq = sf/2
 
-	# Set bands
-	low = low/nyq
+	# Set freq
 	high = high/nyq
 
 	# Calculate coefficients
-	b, a = butter(order, [low, high], btype='band')
+	b, a = butter(order, high, btype='high')
 
 	# Filter signal
 	filtered_data = lfilter(b, a, data)
@@ -39,7 +47,7 @@ def filter_data(data, low, high, sf, order=2):
 
 def get_spikes(data, spike_window=80, tf=5, offset=10, max_thresh=350):
 
-	plt.plot(data)
+	#plt.plot(data)
 	# Calculate threshold based on data mean
 	thresh = np.mean(np.abs(data)) *tf
 
@@ -83,20 +91,19 @@ def get_spikes(data, spike_window=80, tf=5, offset=10, max_thresh=350):
 	#spike_samp = spike_samp[ind]
 	#wave_form = wave_form[ind]
 
-	plt.plot(data)
-	plt.plot(spike_samp, v_peaks, 'ok', markersize=10)
+	#plt.plot(data)
+	#plt.plot(spike_samp, v_peaks, 'ok', markersize=10)
 
 	return spike_samp, wave_form, v_peaks
 
 
 
 
-if __name__ == "__main__":
+def getspiketrain(data, dt, nclusters):
+	plot = 0
 
-	data = np.genfromtxt('datasets/testSpikeSortORN.txt', delimiter='\t')
 	nt = len(data)
 
-	dt = 0.0001
 	# Determine duration of recording in seconds
 	dur_sec = int(nt * dt)
 
@@ -110,59 +117,70 @@ if __name__ == "__main__":
 	# plt.show()
 
 	# bandpass filter the data
-	spike_data = filter_data(data, low=50, high=4000, sf=1/dt)
+	spike_data = filter_data(data, low=50, high=20, sf=1/dt)
 	# fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 5))
 	# ax1.plot(time, data, linewidth=0.5)
 	# ax2.plot(time, spike_data, linewidth=0.5)
 	#
 
-	spike_samp, wave_form, v_peaks = get_spikes(-spike_data, spike_window=80, offset=40)
-	np.random.seed(10)
-	fig, ax = plt.subplots(figsize=(15, 5))
+	spike_samp, wave_form, v_peaks = get_spikes(-spike_data, spike_window=40, offset=10)
+	#np.random.seed(10)
+	#fig, ax = plt.subplots(figsize=(5, 8))
 
-	for i in range(100):
-		spike = np.random.randint(0, wave_form.shape[0])
-		ax.plot(wave_form[spike, :], 'k', alpha=0.1)
-
-	plt.show()
+	#for i in range(100):
+		#spike = np.random.randint(0, wave_form.shape[0])
+		#ax.plot(wave_form[spike, :], 'k', alpha=0.1)
+	#plt.show()
 
 
 	# reduce number of dimensions with PCA
-	scaler = sk.preprocessing.MinMaxScaler()
+	scaler = sk.preprocessing.StandardScaler()
 	dataset_scaled = scaler.fit_transform(wave_form)
 
-	model = PCA(n_components=2)
-	#W = model.components_
+	model = PCA()
 	pca_result = model.fit_transform(dataset_scaled)
-	print("The first two PCs account for {}%".format(np.sum(model.explained_variance_[:2]) * 100))
 
 	# if we want to project new data onto the pca basis, then we just take the scores
 	# in each PC and multiply with the waveforms. Now the waveforms are represented in
 	# PC space
 
+	agg = AgglomerativeClustering(n_clusters=nclusters)
+	assignment = agg.fit_predict(pca_result)
 
-	#pc_proj = W @ wave_form.T
+	if plot:
+		fig = plt.figure(constrained_layout=True)
+		gs = fig.add_gridspec(2, 2)
+		f_ax1 = fig.add_subplot(gs[0, 0])
+
+		f_ax2 = fig.add_subplot(gs[0, 1])
+
+		f_ax3 = fig.add_subplot(gs[1, :])
+		plt.tight_layout()
 
 
-	num_clus = 6
-	kmeans = KMeans(n_clusters=3, random_state=170).fit_predict(pca_result)
+		f_ax1.scatter(pca_result[:, 0], pca_result[:, 1], c=assignment)
 
-	fig, (ax1, ax2) = plt.subplots(1, 2)
-	ax1.plot(wave_form[np.where(kmeans == 0)[0], :].T, 'k', alpha=0.1)
-	ax1.plot(wave_form[np.where(kmeans == 1)[0], :].T, 'b', alpha=0.1)
-	ax1.plot(wave_form[np.where(kmeans == 2)[0], :].T, 'r', alpha=0.1)
 
-	# plot spike trace
-	#ax2.plot(-spike_data)
+		colors = ['#441975', 'y', '#03ADD5']
+		for i in range(nclusters):
+			f_ax2.plot(wave_form[np.where(assignment == i)[0], :].T, color=colors[i], alpha=0.3)
 
-	# overlay circles denoting spikes from different neurons
+		# overlay circles denoting spikes from different neurons
 
-	# all spikes in unfiltered trace
-	raw = data[spike_samp]
-	plt.plot(data, linewidth=0.5)
-	# all spikes
-	#plt.plot(spike_samp, raw, 'o')
-	plt.plot(spike_samp[np.where(kmeans == 0)[0]], raw[np.where(kmeans == 0)[0]], 'ok', markersize=2)
-	plt.plot(spike_samp[np.where(kmeans == 1)[0]], raw[np.where(kmeans == 1)[0]], 'ob', markersize=2)
-	plt.plot(spike_samp[np.where(kmeans == 2)[0]], raw[np.where(kmeans == 2)[0]], 'or', markersize=2)
+		# all spikes in unfiltered trace
+		raw = data[spike_samp]
+		f_ax3.plot(time, data, '-k', linewidth=0.5)
+		# all spikes
+		#plt.plot(spike_samp, raw, 'o')
+		for i in range(nclusters):
+			f_ax3.plot(time[spike_samp[np.where(assignment == i)[0]]], raw[np.where(assignment == 0)[0]], 'o', color=colors[i], markersize=5)
 
+	# get spike times of each cluster
+	sptimes1 = time[spike_samp[np.where(assignment == 0)[0]]]
+
+	# bin the spike times
+	sp_count_fun = lambda x: np.histogram(x, np.arange(0.5, len(data) + 1) * dt - dt)[0]
+	sps = sp_count_fun(sptimes1)
+	sps = sps.reshape((-1, 1))
+
+	return sps
